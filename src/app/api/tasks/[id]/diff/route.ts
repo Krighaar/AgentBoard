@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { execSync } from "child_process";
+import { getWorktreeDiff } from "@/lib/git-operations";
 
 export async function GET(
   _request: Request,
@@ -11,6 +12,25 @@ export async function GET(
 
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
+  }
+
+  // If task has a worktree, diff against base branch
+  if (task.worktreePath) {
+    try {
+      const board = await prisma.board.findUnique({
+        where: { id: task.boardId },
+        select: { baseBranch: true },
+      });
+      const diff = getWorktreeDiff(
+        task.worktreePath,
+        board?.baseBranch || "main"
+      );
+      return NextResponse.json({ diff: diff || "(no changes detected)" });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to run git diff";
+      return NextResponse.json({ diff: "", error: message }, { status: 200 });
+    }
   }
 
   if (!task.repoUrl) {

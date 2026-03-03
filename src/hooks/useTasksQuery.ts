@@ -31,13 +31,53 @@ export function useBoardsQuery() {
 export function useCreateBoard() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { name: string; description?: string }) => {
+    mutationFn: async (data: {
+      name: string;
+      description?: string;
+      repoPath?: string;
+      baseBranch?: string;
+      gitProvider?: string;
+    }) => {
       const res = await fetch("/api/boards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error("Failed to create board");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to create board");
+      }
+      return res.json() as Promise<Board>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["boards"] });
+    },
+  });
+}
+
+export function useUpdateBoard() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...data
+    }: {
+      id: string;
+      name?: string;
+      description?: string;
+      repoPath?: string;
+      baseBranch?: string;
+      gitProvider?: string;
+    }) => {
+      const res = await fetch(`/api/boards/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to update board");
+      }
       return res.json() as Promise<Board>;
     },
     onSuccess: () => {
@@ -121,7 +161,10 @@ export function useUpdateTask() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error("Failed to update task");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to update task");
+      }
       return res.json();
     },
     onSuccess: () => {

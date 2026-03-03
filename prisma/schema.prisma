@@ -35,6 +35,10 @@ model Task {
   cronExpression String   @default("") // recurring cron (e.g., "0 9 * * 1")
   recurring      Boolean  @default(false) // marks template tasks
   sourceTaskId   String   @default("") // links cloned tasks to template
+  // Git workflow fields
+  branchName   String   @default("") // git branch for this task
+  prUrl        String   @default("") // pull request URL
+  worktreePath String   @default("") // path to git worktree
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -48,6 +52,9 @@ model Board {
   id          String   @id @default(cuid())
   name        String
   description String   @default("")
+  repoPath    String   @default("") // local path to git repo
+  baseBranch  String   @default("main") // base branch for PRs
+  gitProvider String   @default("") // "" = auto-detect, "github", "azuredevops"
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

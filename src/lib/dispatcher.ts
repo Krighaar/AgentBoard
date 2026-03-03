@@ -6,6 +6,13 @@ import { emitEvent } from "./event-emitter";
 import { getMaxConcurrent } from "./settings";
 import { getScheduler } from "./scheduler";
 import { fireIntegrations } from "./integration-dispatcher";
+import {
+  createWorktreeForTask,
+  commitAndPush,
+  createPullRequest,
+  cleanupOrphanedWorktrees,
+  detectProvider,
+} from "./git-operations";
 
 const POLL_INTERVAL = 5000;
 
@@ -96,6 +103,19 @@ class AgentDispatcher {
         emitEvent({ type: "task:updated", taskId: task.id });
       }
     }
+
+    // Prune orphaned git worktrees for boards with repoPath
+    try {
+      const boards = await prisma.board.findMany({
+        where: { repoPath: { not: "" } },
+        select: { repoPath: true },
+      });
+      for (const board of boards) {
+        cleanupOrphanedWorktrees(board.repoPath);
+      }
+    } catch {
+      // Non-critical
+    }
   }
 
   private async poll() {
@@ -143,8 +163,45 @@ class AgentDispatcher {
     const task = await prisma.task.findUnique({ where: { id: taskId } });
     if (!task) return;
 
+    // Fetch board to check for git repo configuration
+    const board = await prisma.board.findUnique({
+      where: { id: task.boardId },
+      select: { repoPath: true, baseBranch: true, gitProvider: true },
+    });
+
     // Resolve working directory: use repoUrl if set, otherwise create a workspace
     let workDir = task.repoUrl || "";
+    let worktreePath = "";
+    let branchName = "";
+
+    // If board has a repoPath and task doesn't override with repoUrl, create a worktree
+    if (board?.repoPath && !task.repoUrl) {
+      try {
+        const result = createWorktreeForTask(
+          board.repoPath,
+          taskId,
+          task.title,
+          board.baseBranch || "main"
+        );
+        workDir = result.worktreePath;
+        worktreePath = result.worktreePath;
+        branchName = result.branchName;
+
+        // Save worktree info on the task
+        await prisma.task.update({
+          where: { id: taskId },
+          data: { worktreePath, branchName },
+        });
+      } catch (err) {
+        // If worktree creation fails, fall back to default workspace
+        const errMsg = err instanceof Error ? err.message : "Worktree creation failed";
+        await prisma.taskLog.create({
+          data: { taskId, stream: "system", content: `Git worktree setup failed: ${errMsg}. Falling back to default workspace.` },
+        });
+        workDir = "";
+      }
+    }
+
     if (!workDir) {
       workDir = path.join(process.cwd(), "workspaces", taskId);
       mkdirSync(workDir, { recursive: true });
@@ -168,9 +225,13 @@ class AgentDispatcher {
 
     // Build prompt from task details
     let prompt = `You are an autonomous AI agent. Complete the following task without asking questions.
-Work in the current directory: ${workDir}
-
-Task: ${task.title}`;
+Work in the current directory: ${workDir}`;
+    if (branchName) {
+      prompt += `\nYou are working on branch: ${branchName}`;
+      prompt += `\nDo NOT create new branches or switch branches. Stay on the current branch.`;
+      prompt += `\nDo NOT commit changes — the platform will handle git operations automatically.`;
+    }
+    prompt += `\n\nTask: ${task.title}`;
     if (task.description) {
       prompt += `\n\nDescription:\n${task.description}`;
     }
@@ -208,7 +269,37 @@ Task: ${task.title}`;
           .map((t) => t.trim())
           .includes("approval:required");
 
-        const finalStatus = needsApproval ? "review" : "done";
+        // Git workflow: commit, push, and create PR if task has a worktree
+        let prUrl = "";
+        if (completedTask?.worktreePath && completedTask.branchName && board?.repoPath) {
+          try {
+            const provider = detectProvider(board.repoPath, board.gitProvider || undefined);
+            commitAndPush(
+              completedTask.worktreePath,
+              completedTask.branchName,
+              `[AgentBoard] ${task.title}`
+            );
+            prUrl = createPullRequest(
+              completedTask.worktreePath,
+              task.title,
+              `Automated PR created by AgentBoard.\n\nTask: ${task.title}\n${task.description || ""}`,
+              board.baseBranch || "main",
+              provider
+            );
+            await prisma.taskLog.create({
+              data: { taskId, stream: "system", content: `PR created: ${prUrl}` },
+            });
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : "Git operation failed";
+            await prisma.taskLog.create({
+              data: { taskId, stream: "system", content: `Git post-completion failed: ${errMsg}` },
+            });
+            // Don't fail the task — the work is done, git ops are best-effort
+          }
+        }
+
+        // If the task has a worktree and a PR, always send to review
+        const finalStatus = (needsApproval || prUrl) ? "review" : "done";
         await prisma.task.update({
           where: { id: taskId },
           data: {
@@ -218,6 +309,7 @@ Task: ${task.title}`;
             inputTokens: usage.inputTokens,
             outputTokens: usage.outputTokens,
             costEstimate: usage.costEstimate,
+            ...(prUrl && { prUrl }),
           },
         });
         emitEvent({ type: "task:updated", taskId });

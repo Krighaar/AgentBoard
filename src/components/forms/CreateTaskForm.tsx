@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useCreateTask, useSkillsQuery } from "@/hooks/useTasksQuery";
+import { useCreateTask, useSkillsQuery, useBoardsQuery } from "@/hooks/useTasksQuery";
 import { toast } from "sonner";
 import { describeCron } from "@/lib/cron-parser";
 import type { Skill } from "@/generated/prisma/client";
@@ -56,6 +56,9 @@ export function CreateTaskForm({ boardId, externalOpen, onExternalOpenChange, in
 
   const createTask = useCreateTask();
   const { data: skills = [] } = useSkillsQuery();
+  const { data: boards = [] } = useBoardsQuery();
+  const currentBoard = boards.find((b) => b.id === boardId);
+  const boardHasRepo = !!(currentBoard as { repoPath?: string })?.repoPath;
 
   // Apply initial skill when provided
   useEffect(() => {
@@ -197,16 +200,24 @@ export function CreateTaskForm({ boardId, externalOpen, onExternalOpenChange, in
             />
           </div>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Working Directory
-            </label>
-            <Input
-              value={repoUrl}
-              onChange={(e) => setRepoUrl(e.target.value)}
-              placeholder="Defaults to workspaces/<taskId> if empty"
-            />
-          </div>
+          {boardHasRepo ? (
+            <div className="rounded-md bg-muted/30 p-3">
+              <p className="text-xs text-muted-foreground">
+                This board is connected to a git repository. The agent will work on its own branch automatically.
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                Working Directory
+              </label>
+              <Input
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                placeholder="Defaults to workspaces/<taskId> if empty"
+              />
+            </div>
+          )}
 
           <div>
             <label className="mb-1 block text-sm font-medium">Tags</label>

@@ -210,8 +210,8 @@ export function TaskCardDetail({
     updateTask.mutate(
       { id: task.id, status: "done" },
       {
-        onSuccess: () => toast.success("Task approved"),
-        onError: () => toast.error("Failed to approve task"),
+        onSuccess: () => toast.success(task.prUrl ? "Task approved & PR merged" : "Task approved"),
+        onError: (err) => toast.error(err.message || "Failed to approve task"),
       }
     );
   };
@@ -220,7 +220,7 @@ export function TaskCardDetail({
     updateTask.mutate(
       { id: task.id, status: "failed", error: "Rejected by user" },
       {
-        onSuccess: () => toast.success("Task rejected"),
+        onSuccess: () => toast.success(task.prUrl ? "Task rejected & PR closed" : "Task rejected"),
         onError: () => toast.error("Failed to reject task"),
       }
     );
@@ -375,6 +375,36 @@ export function TaskCardDetail({
               className="text-xs font-mono"
             />
           </div>
+
+          {/* Git Branch & PR */}
+          {(task.branchName || task.prUrl) && (
+            <div>
+              <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+                Git
+              </h4>
+              <div className="space-y-1 rounded-md bg-muted/30 p-3">
+                {task.branchName && (
+                  <div className="text-xs">
+                    <span className="text-muted-foreground">Branch: </span>
+                    <span className="font-mono">{task.branchName}</span>
+                  </div>
+                )}
+                {task.prUrl && (
+                  <div className="text-xs">
+                    <span className="text-muted-foreground">PR: </span>
+                    <a
+                      href={task.prUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-400 underline hover:text-blue-300"
+                    >
+                      {task.prUrl}
+                    </a>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Tags */}
           <div>
@@ -581,7 +611,7 @@ export function TaskCardDetail({
                   disabled={updateTask.isPending}
                   className="bg-green-600 hover:bg-green-700"
                 >
-                  Approve
+                  {task.prUrl ? "Approve & Merge" : "Approve"}
                 </Button>
                 <Button
                   variant="destructive"
@@ -616,7 +646,7 @@ export function TaskCardDetail({
             {(task.status === TaskStatus.DONE ||
               task.status === TaskStatus.FAILED ||
               task.status === TaskStatus.REVIEW) &&
-              task.repoUrl && (
+              (task.repoUrl || task.worktreePath) && (
               <Button
                 variant="outline"
                 size="sm"
