@@ -16,6 +16,10 @@ const updateTaskSchema = z.object({
   inputTokens: z.number().int().optional(),
   outputTokens: z.number().int().optional(),
   costEstimate: z.number().optional(),
+  tags: z.string().optional(),
+  dependsOn: z.string().optional(),
+  model: z.string().optional(),
+  boardId: z.string().optional(),
 });
 
 export async function GET(

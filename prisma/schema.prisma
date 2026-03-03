@@ -26,10 +26,27 @@ model Task {
   inputTokens  Int      @default(0)
   outputTokens Int      @default(0)
   costEstimate Float    @default(0) // estimated cost in USD
+  tags        String    @default("") // comma-separated tags
+  dependsOn   String    @default("") // JSON array of task IDs
+  model       String    @default("") // claude model override (e.g. "sonnet", "haiku", "opus")
+  boardId     String    @default("default")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  logs TaskLog[]
+  board Board  @relation(fields: [boardId], references: [id])
+  logs  TaskLog[]
+
+  @@index([boardId])
+}
+
+model Board {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tasks Task[]
 }
 
 model Setting {

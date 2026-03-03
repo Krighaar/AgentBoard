@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { emitEvent } from "@/lib/event-emitter";
+import { ensureDefaults } from "@/lib/ensure-defaults";
 import { z } from "zod/v4";
 
 const createTaskSchema = z.object({
@@ -9,10 +10,19 @@ const createTaskSchema = z.object({
   criteria: z.string().optional().default(""),
   repoUrl: z.string().optional().default(""),
   priority: z.number().int().min(1).max(3).optional().default(2),
+  tags: z.string().optional().default(""),
+  dependsOn: z.string().optional().default(""),
+  model: z.string().optional().default(""),
+  boardId: z.string().optional().default("default"),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
+  await ensureDefaults();
+  const { searchParams } = new URL(request.url);
+  const boardId = searchParams.get("boardId") || "default";
+
   const tasks = await prisma.task.findMany({
+    where: { boardId },
     orderBy: [{ priority: "asc" }, { position: "asc" }, { createdAt: "asc" }],
   });
   return NextResponse.json(tasks);
