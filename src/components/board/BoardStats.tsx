@@ -12,6 +12,7 @@ export function BoardStats() {
     const done = tasks.filter((t) => t.status === "done").length;
     const failed = tasks.filter((t) => t.status === "failed").length;
     const inProgress = tasks.filter((t) => t.status === "in_progress").length;
+    const review = tasks.filter((t) => t.status === "review").length;
     const queued = tasks.filter(
       (t) => t.status === "todo" || t.status === "ready"
     ).length;
@@ -44,6 +45,7 @@ export function BoardStats() {
       done,
       failed,
       inProgress,
+      review,
       queued,
       successRate,
       avgDuration,
@@ -60,6 +62,9 @@ export function BoardStats() {
       <Stat label="Total" value={stats.total} />
       <Stat label="Queue" value={stats.queued} />
       <Stat label="Running" value={stats.inProgress} />
+      {stats.review > 0 && (
+        <Stat label="Review" value={stats.review} className="text-violet-400" />
+      )}
       <Stat label="Done" value={stats.done} className="text-green-400" />
       <Stat label="Failed" value={stats.failed} className="text-red-400" />
       {stats.successRate !== null && (

@@ -21,7 +21,7 @@ export class AgentProcess extends EventEmitter {
     this.taskId = taskId;
   }
 
-  async start(prompt: string, cwd?: string) {
+  async start(prompt: string, cwd?: string, model?: string) {
     // Strip CLAUDECODE env var to avoid nested session error
     const env = { ...process.env };
     delete env.CLAUDECODE;
@@ -31,6 +31,12 @@ export class AgentProcess extends EventEmitter {
         delete env[key];
       }
     }
+
+    const MODEL_MAP: Record<string, string> = {
+      opus: "claude-opus-4-6",
+      sonnet: "claude-sonnet-4-6",
+      haiku: "claude-haiku-4-5-20251001",
+    };
 
     const args = [
       "-p",
@@ -42,6 +48,10 @@ export class AgentProcess extends EventEmitter {
       "--permission-mode",
       "bypassPermissions",
     ];
+
+    if (model && MODEL_MAP[model]) {
+      args.push("--model", MODEL_MAP[model]);
+    }
 
     this.process = spawn("claude", args, {
       env,

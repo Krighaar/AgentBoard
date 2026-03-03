@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TaskCardDetail } from "./TaskCardDetail";
@@ -11,6 +11,8 @@ import {
   STATUS_COLORS,
   TaskStatus,
 } from "@/lib/types";
+import { tagColor } from "@/lib/tag-colors";
+import { useTasksQuery } from "@/hooks/useTasksQuery";
 import type { Task } from "@/generated/prisma/client";
 
 interface TaskCardProps {
@@ -19,6 +21,31 @@ interface TaskCardProps {
 
 export function TaskCard({ task }: TaskCardProps) {
   const [detailOpen, setDetailOpen] = useState(false);
+  const { data: allTasks } = useTasksQuery();
+
+  const tags = useMemo(
+    () =>
+      task.tags
+        ? task.tags
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean)
+        : [],
+    [task.tags]
+  );
+
+  const isBlocked = useMemo(() => {
+    if (!task.dependsOn || !allTasks) return false;
+    try {
+      const depIds: string[] = JSON.parse(task.dependsOn);
+      return depIds.some((id) => {
+        const dep = allTasks.find((t) => t.id === id);
+        return !dep || dep.status !== "done";
+      });
+    } catch {
+      return false;
+    }
+  }, [task.dependsOn, allTasks]);
 
   return (
     <>
@@ -42,6 +69,19 @@ export function TaskCard({ task }: TaskCardProps) {
           </p>
         )}
 
+        {tags.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-medium ${tagColor(tag)}`}
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+
         <div className="mt-2 flex items-center gap-2">
           <Badge
             variant="secondary"
@@ -49,6 +89,18 @@ export function TaskCard({ task }: TaskCardProps) {
           >
             {task.status === "in_progress" ? "Running" : task.status}
           </Badge>
+
+          {isBlocked && (
+            <Badge variant="outline" className="text-[10px] border-orange-500/30 bg-orange-500/10 text-orange-400">
+              Blocked
+            </Badge>
+          )}
+
+          {task.model && (
+            <span className="text-[10px] text-muted-foreground capitalize">
+              {task.model}
+            </span>
+          )}
 
           {task.status === TaskStatus.IN_PROGRESS && task.startedAt && (
             <span className="text-[10px] text-muted-foreground">

@@ -1,39 +1,112 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   DragDropContext,
   type DropResult,
 } from "@hello-pangea/dnd";
 import { Column } from "./Column";
+import { BoardSelector } from "./BoardSelector";
 import { CreateTaskForm } from "../forms/CreateTaskForm";
 import { DispatcherToggle } from "./DispatcherToggle";
 import { NotificationToggle } from "./NotificationToggle";
+import { ThemeToggle } from "./ThemeToggle";
 import { BoardStats } from "./BoardStats";
+import { SearchBar } from "./SearchBar";
+import { ShortcutsHelp } from "./ShortcutsHelp";
 import { Button } from "@/components/ui/button";
 import {
   useTasksQuery,
   useUpdateTask,
   useClearDoneTasks,
+  useDispatcherStatus,
 } from "@/hooks/useTasksQuery";
 import { useEventSource } from "@/hooks/useEventSource";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { COLUMN_ORDER, TaskStatus } from "@/lib/types";
 import type { Task } from "@/generated/prisma/client";
+import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
 export function Board() {
   useEventSource();
-  const { data: tasks = [], isLoading } = useTasksQuery();
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [boardId, setBoardId] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("agentboard-boardId") || "default";
+    }
+    return "default";
+  });
+
+  const handleBoardChange = useCallback((id: string) => {
+    setBoardId(id);
+    localStorage.setItem("agentboard-boardId", id);
+  }, []);
+
+  const { data: tasks = [], isLoading } = useTasksQuery(boardId);
   const updateTask = useUpdateTask();
   const clearDoneTasks = useClearDoneTasks();
+  const { data: dispatcherStatus } = useDispatcherStatus();
+
+  // Search & filter state
+  const [search, setSearch] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [tagFilter, setTagFilter] = useState("all");
+
+  // Task form + shortcuts help dialogs
+  const [createFormOpen, setCreateFormOpen] = useState(false);
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
+
+  // Extract unique tags from all tasks
+  const availableTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    for (const task of tasks) {
+      if (task.tags) {
+        for (const tag of task.tags.split(",")) {
+          const trimmed = tag.trim();
+          if (trimmed) tagSet.add(trimmed);
+        }
+      }
+    }
+    return Array.from(tagSet).sort();
+  }, [tasks]);
+
+  // Filter tasks
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      // Search filter
+      if (search) {
+        const q = search.toLowerCase();
+        const matchesTitle = task.title.toLowerCase().includes(q);
+        const matchesDesc = task.description.toLowerCase().includes(q);
+        if (!matchesTitle && !matchesDesc) return false;
+      }
+      // Priority filter
+      if (priorityFilter !== "all" && task.priority !== parseInt(priorityFilter)) {
+        return false;
+      }
+      // Tag filter
+      if (tagFilter !== "all") {
+        const taskTags = task.tags
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean);
+        if (!taskTags.includes(tagFilter)) return false;
+      }
+      return true;
+    });
+  }, [tasks, search, priorityFilter, tagFilter]);
 
   const tasksByStatus = useMemo(() => {
     const grouped: Record<string, Task[]> = {
       todo: [],
       ready: [],
       in_progress: [],
+      review: [],
       done: [],
     };
-    for (const task of tasks) {
+    for (const task of filteredTasks) {
       const status = task.status === "failed" ? "done" : task.status;
       if (grouped[status]) {
         grouped[status].push(task);
@@ -44,7 +117,7 @@ export function Board() {
       grouped[key].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     }
     return grouped;
-  }, [tasks]);
+  }, [filteredTasks]);
   const doneCount = tasksByStatus.done.length;
 
   const onDragEnd = useCallback(
@@ -54,8 +127,8 @@ export function Board() {
       const { draggableId, destination } = result;
       const newStatus = destination.droppableId;
 
-      // Prevent manual drag into "in_progress" - only dispatcher does this
-      if (newStatus === TaskStatus.IN_PROGRESS) return;
+      // Prevent manual drag into "in_progress" or "review" - only dispatcher does this
+      if (newStatus === TaskStatus.IN_PROGRESS || newStatus === TaskStatus.REVIEW) return;
 
       const task = tasks.find((t) => t.id === draggableId);
       if (!task) return;
@@ -79,6 +152,77 @@ export function Board() {
     [tasks, updateTask]
   );
 
+  const handleExport = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/tasks/export?boardId=${boardId}`);
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `agentboard-tasks-${boardId}-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Tasks exported");
+    } catch {
+      toast.error("Failed to export tasks");
+    }
+  }, [boardId]);
+
+  const handleImport = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const res = await fetch("/api/tasks/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Import failed");
+        }
+        const result = await res.json();
+        toast.success(`Imported ${result.imported} tasks`);
+        queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to import tasks");
+      }
+      // Reset file input so same file can be re-imported
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+    [queryClient]
+  );
+
+  // Keyboard shortcuts
+  const handleToggleDispatcher = useCallback(async () => {
+    try {
+      const res = await fetch("/api/dispatcher", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: dispatcherStatus?.running ? "stop" : "start",
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to toggle dispatcher");
+    } catch {
+      // silently ignore
+    }
+  }, [dispatcherStatus?.running]);
+
+  const shortcutHandlers = useMemo(
+    () => ({
+      onNewTask: () => setCreateFormOpen(true),
+      onToggleDispatcher: handleToggleDispatcher,
+      onShowHelp: () => setShortcutsHelpOpen(true),
+    }),
+    [handleToggleDispatcher]
+  );
+  useKeyboardShortcuts(shortcutHandlers);
+
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -90,9 +234,30 @@ export function Board() {
   return (
     <div className="flex h-screen flex-col">
       <header className="flex items-center justify-between border-b border-border px-6 py-4">
-        <h1 className="text-xl font-semibold">AgentBoard</h1>
         <div className="flex items-center gap-3">
+          <h1 className="text-xl font-semibold">AgentBoard</h1>
+          <BoardSelector boardId={boardId} onBoardChange={handleBoardChange} />
+        </div>
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
           <NotificationToggle />
+          <Button variant="outline" size="sm" onClick={handleExport}>
+            Export
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Import
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={handleImport}
+          />
           <Button
             variant="outline"
             size="sm"
@@ -102,11 +267,27 @@ export function Board() {
             Clear Done
           </Button>
           <DispatcherToggle />
-          <CreateTaskForm />
+          <CreateTaskForm
+            boardId={boardId}
+            externalOpen={createFormOpen}
+            onExternalOpenChange={setCreateFormOpen}
+          />
         </div>
       </header>
 
       <BoardStats />
+
+      <SearchBar
+        search={search}
+        onSearchChange={setSearch}
+        priorityFilter={priorityFilter}
+        onPriorityFilterChange={setPriorityFilter}
+        tagFilter={tagFilter}
+        onTagFilterChange={setTagFilter}
+        availableTags={availableTags}
+      />
+
+      <ShortcutsHelp open={shortcutsHelpOpen} onOpenChange={setShortcutsHelpOpen} />
 
       <div className="flex flex-1 gap-6 overflow-x-auto p-6">
         <DragDropContext onDragEnd={onDragEnd}>

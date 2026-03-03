@@ -19,8 +19,11 @@ export function LogViewer({ taskId, isActive }: LogViewerProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastTimestampRef = useRef<string | null>(null);
+  const isFetchingRef = useRef(false);
 
   const fetchLogs = useCallback(async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     const params = lastTimestampRef.current
       ? `?after=${encodeURIComponent(lastTimestampRef.current)}`
       : "";
@@ -30,10 +33,19 @@ export function LogViewer({ taskId, isActive }: LogViewerProps) {
       const newLogs: LogEntry[] = await res.json();
       if (newLogs.length > 0) {
         lastTimestampRef.current = newLogs[newLogs.length - 1].timestamp;
-        setLogs((prev) => [...prev, ...newLogs]);
+        setLogs((prev) => {
+          const existingIds = new Set(prev.map((log) => log.id));
+          const dedupedLogs = newLogs.filter(
+            (log) => !existingIds.has(log.id)
+          );
+          if (dedupedLogs.length === 0) return prev;
+          return [...prev, ...dedupedLogs];
+        });
       }
     } catch {
       // fetch failed
+    } finally {
+      isFetchingRef.current = false;
     }
   }, [taskId]);
 
@@ -41,6 +53,7 @@ export function LogViewer({ taskId, isActive }: LogViewerProps) {
     // Reset on taskId change
     setLogs([]);
     lastTimestampRef.current = null;
+    isFetchingRef.current = false;
     fetchLogs();
   }, [taskId, fetchLogs]);
 

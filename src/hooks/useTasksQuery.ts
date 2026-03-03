@@ -1,18 +1,64 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Task } from "@/generated/prisma/client";
+import type { Task, Board } from "@/generated/prisma/client";
 
-async function fetchTasks(): Promise<Task[]> {
-  const res = await fetch("/api/tasks");
+async function fetchTasks(boardId: string): Promise<Task[]> {
+  const res = await fetch(`/api/tasks?boardId=${encodeURIComponent(boardId)}`);
   if (!res.ok) throw new Error("Failed to fetch tasks");
   return res.json();
 }
 
-export function useTasksQuery() {
+export function useTasksQuery(boardId: string = "default") {
   return useQuery({
-    queryKey: ["tasks"],
-    queryFn: fetchTasks,
+    queryKey: ["tasks", boardId],
+    queryFn: () => fetchTasks(boardId),
+  });
+}
+
+// Board hooks
+export function useBoardsQuery() {
+  return useQuery({
+    queryKey: ["boards"],
+    queryFn: async (): Promise<Board[]> => {
+      const res = await fetch("/api/boards");
+      if (!res.ok) throw new Error("Failed to fetch boards");
+      return res.json();
+    },
+  });
+}
+
+export function useCreateBoard() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: { name: string; description?: string }) => {
+      const res = await fetch("/api/boards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to create board");
+      return res.json() as Promise<Board>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["boards"] });
+    },
+  });
+}
+
+export function useDeleteBoard() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/boards/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to delete board");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["boards"] });
+    },
   });
 }
 
@@ -25,6 +71,10 @@ export function useCreateTask() {
       criteria?: string;
       repoUrl?: string;
       priority?: number;
+      tags?: string;
+      dependsOn?: string;
+      model?: string;
+      boardId?: string;
     }) => {
       const res = await fetch("/api/tasks", {
         method: "POST",
@@ -55,6 +105,10 @@ export function useUpdateTask() {
       criteria?: string;
       repoUrl?: string;
       priority?: number;
+      tags?: string;
+      dependsOn?: string;
+      model?: string;
+      error?: string | null;
     }) => {
       const res = await fetch(`/api/tasks/${id}`, {
         method: "PATCH",

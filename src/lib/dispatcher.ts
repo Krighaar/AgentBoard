@@ -97,10 +97,34 @@ class AgentDispatcher {
     const tasks = await prisma.task.findMany({
       where: { status: "ready" },
       orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
-      take: slotsAvailable,
+      take: slotsAvailable * 3, // fetch extra to account for blocked tasks
     });
 
+    // Filter out tasks whose dependencies are not all done
+    const eligible: typeof tasks = [];
     for (const task of tasks) {
+      if (task.dependsOn) {
+        try {
+          const depIds: string[] = JSON.parse(task.dependsOn);
+          if (depIds.length > 0) {
+            const deps = await prisma.task.findMany({
+              where: { id: { in: depIds } },
+              select: { id: true, status: true },
+            });
+            const allDone = depIds.every((id) => {
+              const dep = deps.find((d) => d.id === id);
+              return dep && dep.status === "done";
+            });
+            if (!allDone) continue; // skip blocked task
+          }
+        } catch {
+          // Invalid JSON in dependsOn, treat as no dependencies
+        }
+      }
+      eligible.push(task);
+    }
+
+    for (const task of eligible) {
       if (this.activeProcesses.size >= this.maxConcurrent) break;
       await this.executeTask(task.id);
     }
@@ -134,7 +158,7 @@ Task: ${task.title}`;
     this.activeProcesses.set(taskId, agentProcess);
 
     try {
-      const pid = await agentProcess.start(prompt, workDir);
+      const pid = await agentProcess.start(prompt, workDir, task.model || undefined);
 
       await prisma.task.update({
         where: { id: taskId },
@@ -148,10 +172,18 @@ Task: ${task.title}`;
 
       agentProcess.on("complete", async (usage: { inputTokens: number; outputTokens: number; costEstimate: number }) => {
         this.activeProcesses.delete(taskId);
+
+        // Check if task requires approval (has "approval:required" tag)
+        const completedTask = await prisma.task.findUnique({ where: { id: taskId } });
+        const needsApproval = completedTask?.tags
+          ?.split(",")
+          .map((t) => t.trim())
+          .includes("approval:required");
+
         await prisma.task.update({
           where: { id: taskId },
           data: {
-            status: "done",
+            status: needsApproval ? "review" : "done",
             agentPid: null,
             completedAt: new Date(),
             inputTokens: usage.inputTokens,

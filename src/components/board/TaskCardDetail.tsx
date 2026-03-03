@@ -20,11 +20,13 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { LogViewer } from "../logs/LogViewer";
+import { GitDiffViewer } from "./GitDiffViewer";
 import {
   useDeleteTask,
   useStopTask,
   useRetryTask,
   useUpdateTask,
+  useTasksQuery,
 } from "@/hooks/useTasksQuery";
 import {
   PRIORITY_LABELS,
@@ -33,8 +35,16 @@ import {
   TaskStatus,
 } from "@/lib/types";
 import { formatDuration } from "@/lib/utils";
+import { tagColor } from "@/lib/tag-colors";
 import { toast } from "sonner";
 import type { Task } from "@/generated/prisma/client";
+
+const MODEL_OPTIONS = [
+  { value: "", label: "Default" },
+  { value: "opus", label: "Opus" },
+  { value: "sonnet", label: "Sonnet" },
+  { value: "haiku", label: "Haiku" },
+];
 
 interface TaskCardDetailProps {
   task: Task;
@@ -145,10 +155,13 @@ export function TaskCardDetail({
   const stopTask = useStopTask();
   const retryTask = useRetryTask();
   const updateTask = useUpdateTask();
+  const { data: allTasks } = useTasksQuery();
+  const [diffOpen, setDiffOpen] = useState(false);
 
   const isEditable =
     task.status === TaskStatus.TODO ||
     task.status === TaskStatus.READY ||
+    task.status === TaskStatus.REVIEW ||
     task.status === TaskStatus.DONE ||
     task.status === TaskStatus.FAILED;
 
@@ -190,6 +203,26 @@ export function TaskCardDetail({
       },
       onError: () => toast.error("Failed to delete task"),
     });
+  };
+
+  const handleApprove = () => {
+    updateTask.mutate(
+      { id: task.id, status: "done" },
+      {
+        onSuccess: () => toast.success("Task approved"),
+        onError: () => toast.error("Failed to approve task"),
+      }
+    );
+  };
+
+  const handleReject = () => {
+    updateTask.mutate(
+      { id: task.id, status: "failed", error: "Rejected by user" },
+      {
+        onSuccess: () => toast.success("Task rejected"),
+        onError: () => toast.error("Failed to reject task"),
+      }
+    );
   };
 
   const costDisplay =
@@ -342,6 +375,121 @@ export function TaskCardDetail({
             />
           </div>
 
+          {/* Tags */}
+          <div>
+            <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+              Tags
+            </h4>
+            {isEditable ? (
+              <EditableText
+                value={task.tags}
+                onSave={(v) => handleUpdate("tags", v)}
+                placeholder="Comma-separated tags..."
+                className="text-sm"
+              />
+            ) : (
+              <div className="flex flex-wrap gap-1 px-2 py-1">
+                {task.tags ? (
+                  task.tags
+                    .split(",")
+                    .map((t) => t.trim())
+                    .filter(Boolean)
+                    .map((tag) => (
+                      <span
+                        key={tag}
+                        className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tagColor(tag)}`}
+                      >
+                        {tag}
+                      </span>
+                    ))
+                ) : (
+                  <span className="text-muted-foreground italic text-sm">No tags</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Dependencies */}
+          <div>
+            <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+              Dependencies
+            </h4>
+            {isEditable ? (
+              <EditableText
+                value={(() => {
+                  try {
+                    const ids: string[] = task.dependsOn ? JSON.parse(task.dependsOn) : [];
+                    return ids.join(", ");
+                  } catch {
+                    return task.dependsOn;
+                  }
+                })()}
+                onSave={(v) => {
+                  const ids = v.split(",").map((s) => s.trim()).filter(Boolean);
+                  handleUpdate("dependsOn", ids.length > 0 ? JSON.stringify(ids) : "");
+                }}
+                placeholder="Comma-separated task IDs..."
+                className="text-sm font-mono"
+              />
+            ) : null}
+            {(() => {
+              try {
+                const depIds: string[] = task.dependsOn ? JSON.parse(task.dependsOn) : [];
+                if (depIds.length === 0) return null;
+                return (
+                  <div className="mt-1 space-y-1 px-2">
+                    {depIds.map((id) => {
+                      const dep = allTasks?.find((t) => t.id === id);
+                      return (
+                        <div key={id} className="flex items-center gap-2 text-xs">
+                          <Badge
+                            variant="secondary"
+                            className={`text-[10px] ${dep ? STATUS_COLORS[dep.status] : ""}`}
+                          >
+                            {dep ? dep.status : "unknown"}
+                          </Badge>
+                          <span className="truncate">
+                            {dep ? dep.title : id}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              } catch {
+                return null;
+              }
+            })()}
+          </div>
+
+          {/* Model */}
+          <div>
+            <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+              Model
+            </h4>
+            {isEditable ? (
+              <Select
+                value={task.model || ""}
+                onValueChange={(v) => handleUpdate("model", v === "default" ? "" : v)}
+              >
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue placeholder="Default" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MODEL_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value || "default"} value={opt.value || "default"}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <span className="px-2 py-1 text-sm capitalize">
+                {task.model || "Default"}
+              </span>
+            )}
+          </div>
+
           {/* Error */}
           {task.error && (
             <div className="rounded-md bg-red-500/10 p-3">
@@ -364,7 +512,28 @@ export function TaskCardDetail({
           </div>
 
           {/* Actions */}
-          <div className="flex gap-2 pt-2">
+          <div className="flex flex-wrap gap-2 pt-2">
+            {task.status === TaskStatus.REVIEW && (
+              <>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleApprove}
+                  disabled={updateTask.isPending}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  Approve
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleReject}
+                  disabled={updateTask.isPending}
+                >
+                  Reject
+                </Button>
+              </>
+            )}
             {task.status === TaskStatus.IN_PROGRESS && (
               <Button
                 variant="destructive"
@@ -385,6 +554,18 @@ export function TaskCardDetail({
                 Retry
               </Button>
             )}
+            {(task.status === TaskStatus.DONE ||
+              task.status === TaskStatus.FAILED ||
+              task.status === TaskStatus.REVIEW) &&
+              task.repoUrl && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDiffOpen(true)}
+              >
+                View Diff
+              </Button>
+            )}
             {(task.status === TaskStatus.TODO ||
               task.status === TaskStatus.DONE ||
               task.status === TaskStatus.FAILED) && (
@@ -400,6 +581,12 @@ export function TaskCardDetail({
             )}
           </div>
         </div>
+
+        <GitDiffViewer
+          taskId={task.id}
+          open={diffOpen}
+          onOpenChange={setDiffOpen}
+        />
       </SheetContent>
     </Sheet>
   );
