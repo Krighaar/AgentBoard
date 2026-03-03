@@ -103,10 +103,12 @@ src/
 
 1. Polls the database every 5 seconds for tasks with `status: "todo"`
 2. Picks tasks ordered by priority (high first), then creation time
-3. Spawns a `claude -p` subprocess with the task prompt, capped at 2 concurrent agents
-4. Streams agent output into the `TaskLog` table (batched every 500ms)
-5. On completion: marks task as `done`. On failure: auto-retries or marks as `failed`
-6. On startup: detects orphaned `in_progress` tasks (stale PIDs from server restart) and marks them failed
+3. Creates an isolated workspace at `workspaces/<taskId>/` (or uses a custom working directory if provided)
+4. Builds an autonomous prompt from the task fields and pipes it via stdin to `claude -p`
+5. Agent runs with `--permission-mode bypassPermissions` so it can freely use Write, Edit, Bash, and other tools
+6. Streams agent output (`--output-format stream-json --verbose`) into the `TaskLog` table, batched every 500ms
+7. On completion: marks task as `done`. On failure: auto-retries or marks as `failed`
+8. On startup: detects orphaned `in_progress` tasks (stale PIDs from server restart) and marks them failed
 
 ## License
 
