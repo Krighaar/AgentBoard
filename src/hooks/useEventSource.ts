@@ -29,6 +29,7 @@ export function useEventSource() {
             );
 
             queryClient.invalidateQueries({ queryKey: ["tasks"] });
+            queryClient.invalidateQueries({ queryKey: ["analytics"] });
 
             // Send notification on completion or failure
             if (prevTask && prevTask.status === "in_progress") {
@@ -54,6 +55,9 @@ export function useEventSource() {
           }
           if (data.type === "dispatcher:status") {
             queryClient.invalidateQueries({ queryKey: ["dispatcher"] });
+          }
+          if (data.type === "memory:updated") {
+            queryClient.invalidateQueries({ queryKey: ["memory"] });
           }
         } catch {
           // ignore parse errors

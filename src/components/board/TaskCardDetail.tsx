@@ -37,6 +37,7 @@ import {
 import { formatDuration } from "@/lib/utils";
 import { tagColor } from "@/lib/tag-colors";
 import { toast } from "sonner";
+import { describeCron } from "@/lib/cron-parser";
 import type { Task } from "@/generated/prisma/client";
 
 const MODEL_OPTIONS = [
@@ -489,6 +490,64 @@ export function TaskCardDetail({
               </span>
             )}
           </div>
+
+          {/* Schedule */}
+          {(task.scheduledFor || task.cronExpression || task.recurring || task.sourceTaskId) && (
+            <div>
+              <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+                Schedule
+              </h4>
+              <div className="space-y-2 rounded-md bg-muted/30 p-3">
+                {task.scheduledFor && (
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Run at: </span>
+                    {isEditable ? (
+                      <input
+                        type="datetime-local"
+                        defaultValue={new Date(task.scheduledFor).toISOString().slice(0, 16)}
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            handleUpdate("scheduledFor", new Date(e.target.value).toISOString());
+                          }
+                        }}
+                        className="ml-1 rounded border border-input bg-transparent px-1 py-0.5 text-sm"
+                      />
+                    ) : (
+                      <span>{new Date(task.scheduledFor).toLocaleString()}</span>
+                    )}
+                  </div>
+                )}
+                {task.cronExpression && (
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Cron: </span>
+                    {isEditable ? (
+                      <EditableText
+                        value={task.cronExpression}
+                        onSave={(v) => handleUpdate("cronExpression", v)}
+                        placeholder="Cron expression"
+                        className="inline font-mono text-sm"
+                      />
+                    ) : (
+                      <span className="font-mono">{task.cronExpression}</span>
+                    )}
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      ({describeCron(task.cronExpression)})
+                    </span>
+                  </div>
+                )}
+                {task.recurring && (
+                  <Badge variant="outline" className="text-xs border-purple-500/30 bg-purple-500/10 text-purple-400">
+                    Recurring Template
+                  </Badge>
+                )}
+                {task.sourceTaskId && (
+                  <div className="text-xs text-muted-foreground">
+                    Cloned from: <span className="font-mono">{task.sourceTaskId.slice(0, 12)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Error */}
           {task.error && (

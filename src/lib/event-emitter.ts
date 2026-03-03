@@ -17,7 +17,8 @@ if (process.env.NODE_ENV !== "production") {
 export type SSEEvent =
   | { type: "task:updated"; taskId: string }
   | { type: "task:log"; taskId: string; content: string; stream: string }
-  | { type: "dispatcher:status"; running: boolean };
+  | { type: "dispatcher:status"; running: boolean }
+  | { type: "memory:updated"; boardId: string };
 
 export function emitEvent(event: SSEEvent) {
   eventBus.emit("sse", event);

@@ -14,6 +14,10 @@ import { ThemeToggle } from "./ThemeToggle";
 import { BoardStats } from "./BoardStats";
 import { SearchBar } from "./SearchBar";
 import { ShortcutsHelp } from "./ShortcutsHelp";
+import { IntegrationsPanel } from "./IntegrationsPanel";
+import { MemoryPanel } from "./MemoryPanel";
+import { SkillsLibrary } from "../skills/SkillsLibrary";
+import { AnalyticsPanel } from "../analytics/AnalyticsPanel";
 import { Button } from "@/components/ui/button";
 import {
   useTasksQuery,
@@ -24,7 +28,7 @@ import {
 import { useEventSource } from "@/hooks/useEventSource";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { COLUMN_ORDER, TaskStatus } from "@/lib/types";
-import type { Task } from "@/generated/prisma/client";
+import type { Task, Skill } from "@/generated/prisma/client";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -54,9 +58,19 @@ export function Board() {
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [tagFilter, setTagFilter] = useState("all");
 
-  // Task form + shortcuts help dialogs
+  // Task form + shortcuts help + integrations + memory + skills dialogs
   const [createFormOpen, setCreateFormOpen] = useState(false);
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
+  const [integrationsOpen, setIntegrationsOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
+
+  const handleUseSkill = useCallback((skill: Skill) => {
+    setSelectedSkill(skill);
+    setCreateFormOpen(true);
+  }, []);
 
   // Extract unique tags from all tasks
   const availableTags = useMemo(() => {
@@ -266,11 +280,43 @@ export function Board() {
           >
             Clear Done
           </Button>
+          <Button
+            variant={analyticsOpen ? "default" : "outline"}
+            size="sm"
+            onClick={() => setAnalyticsOpen(!analyticsOpen)}
+          >
+            Analytics
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSkillsOpen(true)}
+          >
+            Skills
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMemoryOpen(true)}
+          >
+            Memory
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIntegrationsOpen(true)}
+          >
+            Integrations
+          </Button>
           <DispatcherToggle />
           <CreateTaskForm
             boardId={boardId}
             externalOpen={createFormOpen}
-            onExternalOpenChange={setCreateFormOpen}
+            onExternalOpenChange={(open) => {
+              setCreateFormOpen(open);
+              if (!open) setSelectedSkill(null);
+            }}
+            initialSkill={selectedSkill}
           />
         </div>
       </header>
@@ -288,6 +334,11 @@ export function Board() {
       />
 
       <ShortcutsHelp open={shortcutsHelpOpen} onOpenChange={setShortcutsHelpOpen} />
+      <IntegrationsPanel open={integrationsOpen} onOpenChange={setIntegrationsOpen} />
+      <MemoryPanel boardId={boardId} open={memoryOpen} onOpenChange={setMemoryOpen} />
+      <SkillsLibrary open={skillsOpen} onOpenChange={setSkillsOpen} onUseSkill={handleUseSkill} />
+
+      {analyticsOpen && <AnalyticsPanel boardId={boardId} />}
 
       <div className="flex flex-1 gap-6 overflow-x-auto p-6">
         <DragDropContext onDragEnd={onDragEnd}>

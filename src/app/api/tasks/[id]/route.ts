@@ -20,6 +20,9 @@ const updateTaskSchema = z.object({
   dependsOn: z.string().optional(),
   model: z.string().optional(),
   boardId: z.string().optional(),
+  scheduledFor: z.string().nullable().optional(),
+  cronExpression: z.string().optional(),
+  recurring: z.boolean().optional(),
 });
 
 export async function GET(
@@ -41,11 +44,16 @@ export async function PATCH(
   const { id } = await params;
   try {
     const body = await request.json();
-    const data = updateTaskSchema.parse(body);
+    const { scheduledFor, ...rest } = updateTaskSchema.parse(body);
 
     const task = await prisma.task.update({
       where: { id },
-      data,
+      data: {
+        ...rest,
+        ...(scheduledFor !== undefined && {
+          scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
+        }),
+      },
     });
 
     emitEvent({ type: "task:updated", taskId: task.id });

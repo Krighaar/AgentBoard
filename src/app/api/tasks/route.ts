@@ -14,6 +14,9 @@ const createTaskSchema = z.object({
   dependsOn: z.string().optional().default(""),
   model: z.string().optional().default(""),
   boardId: z.string().optional().default("default"),
+  scheduledFor: z.string().optional(),
+  cronExpression: z.string().optional().default(""),
+  recurring: z.boolean().optional().default(false),
 });
 
 export async function GET(request: Request) {
@@ -38,9 +41,11 @@ export async function POST(request: Request) {
       where: { status: "todo" },
     });
 
+    const { scheduledFor, ...rest } = data;
     const task = await prisma.task.create({
       data: {
-        ...data,
+        ...rest,
+        scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
         position: (maxPos._max.position ?? 0) + 1,
       },
     });

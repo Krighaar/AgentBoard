@@ -30,6 +30,11 @@ model Task {
   dependsOn   String    @default("") // JSON array of task IDs
   model       String    @default("") // claude model override (e.g. "sonnet", "haiku", "opus")
   boardId     String    @default("default")
+  // Scheduling fields
+  scheduledFor   DateTime?          // one-time schedule
+  cronExpression String   @default("") // recurring cron (e.g., "0 9 * * 1")
+  recurring      Boolean  @default(false) // marks template tasks
+  sourceTaskId   String   @default("") // links cloned tasks to template
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -46,7 +51,8 @@ model Board {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tasks Task[]
+  tasks    Task[]
+  memories Memory[]
 }
 
 model Setting {
@@ -64,4 +70,45 @@ model TaskLog {
   task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([taskId, timestamp])
+}
+
+model Memory {
+  id           String   @id @default(cuid())
+  boardId      String
+  key          String
+  value        String
+  source       String   @default("manual") // manual | agent
+  sourceTaskId String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  board Board @relation(fields: [boardId], references: [id])
+
+  @@unique([boardId, key])
+  @@index([boardId])
+}
+
+model Skill {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  prompt      String   @default("")
+  criteria    String   @default("")
+  model       String   @default("")
+  tags        String   @default("")
+  isBuiltIn   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Integration {
+  id        String   @id @default(cuid())
+  type      String          // "slack" | "webhook"
+  name      String
+  config    String   @default("{}") // JSON blob
+  enabled   Boolean  @default(true)
+  events    String   @default("task:done,task:failed") // events to fire on
+  boardId   String   @default("") // scope to board, or "" for all
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

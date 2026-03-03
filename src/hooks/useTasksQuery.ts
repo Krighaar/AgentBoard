@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Task, Board } from "@/generated/prisma/client";
+import type { Task, Board, Integration, Memory, Skill } from "@/generated/prisma/client";
 
 async function fetchTasks(boardId: string): Promise<Task[]> {
   const res = await fetch(`/api/tasks?boardId=${encodeURIComponent(boardId)}`);
@@ -75,6 +75,9 @@ export function useCreateTask() {
       dependsOn?: string;
       model?: string;
       boardId?: string;
+      scheduledFor?: string;
+      cronExpression?: string;
+      recurring?: boolean;
     }) => {
       const res = await fetch("/api/tasks", {
         method: "POST",
@@ -109,6 +112,9 @@ export function useUpdateTask() {
       dependsOn?: string;
       model?: string;
       error?: string | null;
+      scheduledFor?: string | null;
+      cronExpression?: string;
+      recurring?: boolean;
     }) => {
       const res = await fetch(`/api/tasks/${id}`, {
         method: "PATCH",
@@ -220,6 +226,272 @@ export function useUpdateSetting() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings"] });
       queryClient.invalidateQueries({ queryKey: ["dispatcher"] });
+    },
+  });
+}
+
+// Integration hooks
+export function useIntegrationsQuery() {
+  return useQuery({
+    queryKey: ["integrations"],
+    queryFn: async (): Promise<Integration[]> => {
+      const res = await fetch("/api/integrations");
+      if (!res.ok) throw new Error("Failed to fetch integrations");
+      return res.json();
+    },
+  });
+}
+
+export function useCreateIntegration() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: {
+      type: string;
+      name: string;
+      config: string;
+      enabled?: boolean;
+      events?: string;
+      boardId?: string;
+    }) => {
+      const res = await fetch("/api/integrations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to create integration");
+      return res.json() as Promise<Integration>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["integrations"] });
+    },
+  });
+}
+
+export function useUpdateIntegration() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...data
+    }: {
+      id: string;
+      name?: string;
+      config?: string;
+      enabled?: boolean;
+      events?: string;
+      boardId?: string;
+    }) => {
+      const res = await fetch(`/api/integrations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update integration");
+      return res.json() as Promise<Integration>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["integrations"] });
+    },
+  });
+}
+
+export function useDeleteIntegration() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/integrations/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete integration");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["integrations"] });
+    },
+  });
+}
+
+export function useTestIntegration() {
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/integrations/${id}/test`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Test notification failed");
+      }
+      return res.json() as Promise<{ success: boolean }>;
+    },
+  });
+}
+
+// Memory hooks
+export function useMemoryQuery(boardId: string) {
+  return useQuery({
+    queryKey: ["memory", boardId],
+    queryFn: async (): Promise<Memory[]> => {
+      const res = await fetch(`/api/memory?boardId=${encodeURIComponent(boardId)}`);
+      if (!res.ok) throw new Error("Failed to fetch memories");
+      return res.json();
+    },
+  });
+}
+
+export function useCreateMemory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: {
+      boardId: string;
+      key: string;
+      value: string;
+      source?: string;
+      sourceTaskId?: string;
+    }) => {
+      const res = await fetch("/api/memory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to create memory");
+      return res.json() as Promise<Memory>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["memory"] });
+    },
+  });
+}
+
+export function useUpdateMemory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, value }: { id: string; value: string }) => {
+      const res = await fetch(`/api/memory/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value }),
+      });
+      if (!res.ok) throw new Error("Failed to update memory");
+      return res.json() as Promise<Memory>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["memory"] });
+    },
+  });
+}
+
+export function useDeleteMemory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/memory/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete memory");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["memory"] });
+    },
+  });
+}
+
+// Skill hooks
+export function useSkillsQuery() {
+  return useQuery({
+    queryKey: ["skills"],
+    queryFn: async (): Promise<Skill[]> => {
+      const res = await fetch("/api/skills");
+      if (!res.ok) throw new Error("Failed to fetch skills");
+      return res.json();
+    },
+  });
+}
+
+export function useCreateSkill() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: {
+      name: string;
+      description?: string;
+      prompt?: string;
+      criteria?: string;
+      model?: string;
+      tags?: string;
+    }) => {
+      const res = await fetch("/api/skills", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to create skill");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["skills"] });
+    },
+  });
+}
+
+export function useUpdateSkill() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...data }: {
+      id: string;
+      name?: string;
+      description?: string;
+      prompt?: string;
+      criteria?: string;
+      model?: string;
+      tags?: string;
+    }) => {
+      const res = await fetch(`/api/skills/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update skill");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["skills"] });
+    },
+  });
+}
+
+export function useDeleteSkill() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/skills/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to delete skill");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["skills"] });
+    },
+  });
+}
+
+// Analytics hooks
+interface AnalyticsData {
+  dailyCosts: { date: string; cost: number; tokens: number }[];
+  modelBreakdown: { model: string; cost: number; tokens: number; count: number }[];
+  summary: {
+    totalCost: number;
+    totalTasks: number;
+    avgCost: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+  };
+  topTasks: { id: string; title: string; cost: number; model: string; tokens: number }[];
+}
+
+export function useAnalyticsQuery(boardId: string, period: string) {
+  return useQuery({
+    queryKey: ["analytics", boardId, period],
+    queryFn: async (): Promise<AnalyticsData> => {
+      const res = await fetch(
+        `/api/analytics?boardId=${encodeURIComponent(boardId)}&period=${encodeURIComponent(period)}`
+      );
+      if (!res.ok) throw new Error("Failed to fetch analytics");
+      return res.json();
     },
   });
 }

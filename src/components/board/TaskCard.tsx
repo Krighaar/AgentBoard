@@ -96,6 +96,18 @@ export function TaskCard({ task }: TaskCardProps) {
             </Badge>
           )}
 
+          {task.scheduledFor && (
+            <Badge variant="outline" className="text-[10px] border-blue-500/30 bg-blue-500/10 text-blue-400">
+              Scheduled
+            </Badge>
+          )}
+
+          {task.recurring && (
+            <Badge variant="outline" className="text-[10px] border-purple-500/30 bg-purple-500/10 text-purple-400">
+              Recurring
+            </Badge>
+          )}
+
           {task.model && (
             <span className="text-[10px] text-muted-foreground capitalize">
               {task.model}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -18,17 +18,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useCreateTask } from "@/hooks/useTasksQuery";
+import { useCreateTask, useSkillsQuery } from "@/hooks/useTasksQuery";
 import { toast } from "sonner";
-import { TASK_TEMPLATES } from "@/lib/templates";
+import { describeCron } from "@/lib/cron-parser";
+import type { Skill } from "@/generated/prisma/client";
 
 interface CreateTaskFormProps {
   boardId?: string;
   externalOpen?: boolean;
   onExternalOpenChange?: (open: boolean) => void;
+  initialSkill?: Skill | null;
 }
 
-export function CreateTaskForm({ boardId, externalOpen, onExternalOpenChange }: CreateTaskFormProps) {
+export function CreateTaskForm({ boardId, externalOpen, onExternalOpenChange, initialSkill }: CreateTaskFormProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = externalOpen ?? internalOpen;
   const setOpen = useCallback(
@@ -47,15 +49,30 @@ export function CreateTaskForm({ boardId, externalOpen, onExternalOpenChange }: 
   const [dependsOn, setDependsOn] = useState("");
   const [model, setModel] = useState("");
   const [requireApproval, setRequireApproval] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [scheduledFor, setScheduledFor] = useState("");
+  const [cronExpression, setCronExpression] = useState("");
+  const [recurring, setRecurring] = useState(false);
 
   const createTask = useCreateTask();
+  const { data: skills = [] } = useSkillsQuery();
 
-  const handleTemplateSelect = (templateName: string) => {
-    if (templateName === "none") return;
-    const template = TASK_TEMPLATES.find((t) => t.name === templateName);
-    if (!template) return;
-    if (!description.trim()) setDescription(template.description);
-    if (!criteria.trim()) setCriteria(template.criteria);
+  // Apply initial skill when provided
+  useEffect(() => {
+    if (initialSkill && open) {
+      if (!description.trim()) setDescription(initialSkill.prompt);
+      if (!criteria.trim()) setCriteria(initialSkill.criteria);
+      if (!model && initialSkill.model) setModel(initialSkill.model);
+    }
+  }, [initialSkill, open]);
+
+  const handleSkillSelect = (skillId: string) => {
+    if (skillId === "none") return;
+    const skill = skills.find((s) => s.id === skillId);
+    if (!skill) return;
+    if (!description.trim()) setDescription(skill.prompt);
+    if (!criteria.trim()) setCriteria(skill.criteria);
+    if (skill.model && !model) setModel(skill.model);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -90,6 +107,9 @@ export function CreateTaskForm({ boardId, externalOpen, onExternalOpenChange }: 
         dependsOn: dependsOnJson,
         model: model === "default" ? "" : model,
         boardId,
+        ...(scheduledFor && { scheduledFor }),
+        ...(cronExpression && { cronExpression }),
+        ...(recurring && { recurring }),
       },
       {
         onSuccess: () => {
@@ -103,6 +123,10 @@ export function CreateTaskForm({ boardId, externalOpen, onExternalOpenChange }: 
           setDependsOn("");
           setModel("");
           setRequireApproval(false);
+          setShowSchedule(false);
+          setScheduledFor("");
+          setCronExpression("");
+          setRecurring(false);
           setOpen(false);
         },
         onError: () => {
@@ -123,16 +147,16 @@ export function CreateTaskForm({ boardId, externalOpen, onExternalOpenChange }: 
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">Template</label>
-            <Select onValueChange={handleTemplateSelect}>
+            <label className="mb-1 block text-sm font-medium">Skill</label>
+            <Select onValueChange={handleSkillSelect}>
               <SelectTrigger>
-                <SelectValue placeholder="Choose a template..." />
+                <SelectValue placeholder="Choose a skill..." />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">No template</SelectItem>
-                {TASK_TEMPLATES.map((t) => (
-                  <SelectItem key={t.name} value={t.name}>
-                    {t.name}
+                <SelectItem value="none">No skill</SelectItem>
+                {skills.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -249,6 +273,85 @@ export function CreateTaskForm({ boardId, externalOpen, onExternalOpenChange }: 
             <span className="text-xs text-muted-foreground">
               (task goes to Review before Done)
             </span>
+          </div>
+
+          {/* Schedule Section */}
+          <div className="space-y-3 rounded-md border border-border p-3">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between text-sm font-medium"
+              onClick={() => setShowSchedule(!showSchedule)}
+            >
+              Schedule
+              <span className="text-xs text-muted-foreground">
+                {showSchedule ? "Hide" : "Show"}
+              </span>
+            </button>
+            {showSchedule && (
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    Run At (one-time)
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={scheduledFor}
+                    onChange={(e) => setScheduledFor(e.target.value)}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    Cron Expression (recurring)
+                  </label>
+                  <Input
+                    value={cronExpression}
+                    onChange={(e) => {
+                      setCronExpression(e.target.value);
+                      if (e.target.value.trim()) setRecurring(true);
+                    }}
+                    placeholder="e.g., 0 9 * * 1"
+                    className="text-sm font-mono"
+                  />
+                  {cronExpression && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {describeCron(cronExpression)}
+                    </p>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {[
+                      { label: "Hourly", value: "0 * * * *" },
+                      { label: "Daily 9am", value: "0 9 * * *" },
+                      { label: "Weekly Mon", value: "0 9 * * 1" },
+                    ].map((preset) => (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        className="rounded-md border border-border px-2 py-0.5 text-xs hover:bg-muted"
+                        onClick={() => {
+                          setCronExpression(preset.value);
+                          setRecurring(true);
+                        }}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="recurring"
+                    checked={recurring}
+                    onChange={(e) => setRecurring(e.target.checked)}
+                    className="h-4 w-4 rounded border-border"
+                  />
+                  <label htmlFor="recurring" className="text-xs font-medium">
+                    Recurring (template task)
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-2">

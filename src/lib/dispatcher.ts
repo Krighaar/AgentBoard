@@ -4,6 +4,8 @@ import { prisma } from "./db";
 import { AgentProcess } from "./agent-process";
 import { emitEvent } from "./event-emitter";
 import { getMaxConcurrent } from "./settings";
+import { getScheduler } from "./scheduler";
+import { fireIntegrations } from "./integration-dispatcher";
 
 const POLL_INTERVAL = 5000;
 
@@ -27,6 +29,9 @@ class AgentDispatcher {
     this.pollTimer = setInterval(() => this.poll(), POLL_INTERVAL);
     this.poll(); // immediate first poll
 
+    // Start task scheduler
+    getScheduler().start();
+
     emitEvent({ type: "dispatcher:status", running: true });
   }
 
@@ -36,6 +41,10 @@ class AgentDispatcher {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+
+    // Stop task scheduler
+    getScheduler().stop();
+
     emitEvent({ type: "dispatcher:status", running: false });
   }
 
@@ -141,6 +150,22 @@ class AgentDispatcher {
       mkdirSync(workDir, { recursive: true });
     }
 
+    // Fetch board memories to inject into prompt
+    let memorySection = "";
+    try {
+      const memories = await prisma.memory.findMany({
+        where: { boardId: task.boardId },
+        orderBy: { updatedAt: "desc" },
+        take: 20,
+      });
+      if (memories.length > 0) {
+        const lines = memories.map((m) => `- ${m.key}: ${m.value}`).join("\n");
+        memorySection = `\n\n## Project Knowledge Base\nThe following knowledge has been accumulated from previous tasks:\n${lines}`;
+      }
+    } catch {
+      // Non-critical: proceed without memories
+    }
+
     // Build prompt from task details
     let prompt = `You are an autonomous AI agent. Complete the following task without asking questions.
 Work in the current directory: ${workDir}
@@ -151,6 +176,9 @@ Task: ${task.title}`;
     }
     if (task.criteria) {
       prompt += `\n\nAcceptance Criteria:\n${task.criteria}`;
+    }
+    if (memorySection) {
+      prompt += memorySection;
     }
     prompt += `\n\nDo not ask clarifying questions. Execute the task to completion.`;
 
@@ -180,10 +208,11 @@ Task: ${task.title}`;
           .map((t) => t.trim())
           .includes("approval:required");
 
+        const finalStatus = needsApproval ? "review" : "done";
         await prisma.task.update({
           where: { id: taskId },
           data: {
-            status: needsApproval ? "review" : "done",
+            status: finalStatus,
             agentPid: null,
             completedAt: new Date(),
             inputTokens: usage.inputTokens,
@@ -193,8 +222,17 @@ Task: ${task.title}`;
         });
         emitEvent({ type: "task:updated", taskId });
 
-        // Generate summary asynchronously
+        // Fire outbound integrations
+        fireIntegrations(`task:${finalStatus}`, {
+          id: task.id,
+          title: task.title,
+          status: finalStatus,
+          boardId: task.boardId,
+        }).catch(() => {});
+
+        // Generate summary and extract memories asynchronously
         this.generateSummary(taskId).catch(() => {});
+        this.extractMemory(taskId, task.boardId).catch(() => {});
       });
 
       agentProcess.on("error", async (error: Error, usage: { inputTokens: number; outputTokens: number; costEstimate: number }) => {
@@ -233,6 +271,15 @@ Task: ${task.title}`;
               costEstimate: usage.costEstimate,
             },
           });
+
+          // Fire outbound integrations for failure
+          fireIntegrations("task:failed", {
+            id: taskId,
+            title: task.title,
+            status: "failed",
+            boardId: task.boardId,
+            error: error.message,
+          }).catch(() => {});
         }
         emitEvent({ type: "task:updated", taskId });
       });
@@ -314,6 +361,97 @@ Task: ${task.title}`;
       });
     } catch {
       // Summary generation is best-effort
+    }
+  }
+
+  private async extractMemory(taskId: string, boardId: string) {
+    const logs = await prisma.taskLog.findMany({
+      where: { taskId, stream: "stdout" },
+      orderBy: { timestamp: "desc" },
+      take: 100,
+    });
+
+    if (logs.length === 0) return;
+
+    const logText = logs
+      .reverse()
+      .map((l) => l.content)
+      .join("\n")
+      .slice(-8000);
+
+    const prompt = `Extract reusable project knowledge from these agent logs as JSON key-value pairs. Only include stable, reusable facts (conventions, file paths, patterns). Return JSON: {"memories": [{"key": "...", "value": "..."}]}\n\nAgent logs:\n${logText}`;
+
+    try {
+      const { spawn } = await import("child_process");
+
+      const env = { ...process.env };
+      delete env.CLAUDECODE;
+      for (const key of Object.keys(env)) {
+        if (key.startsWith("CLAUDE_")) delete env[key];
+      }
+
+      const proc = spawn("claude", ["-p", "--model", "haiku"], {
+        env,
+        stdio: ["pipe", "pipe", "pipe"],
+        shell: true,
+      });
+
+      proc.stdin?.write(prompt);
+      proc.stdin?.end();
+
+      let output = "";
+      proc.stdout?.on("data", (data: Buffer) => {
+        output += data.toString();
+      });
+
+      await new Promise<void>((resolve) => {
+        proc.on("close", async (code) => {
+          if (code === 0 && output.trim()) {
+            try {
+              // Extract JSON from output (handle markdown code blocks)
+              let jsonStr = output.trim();
+              const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+              if (jsonMatch) jsonStr = jsonMatch[1].trim();
+
+              const parsed = JSON.parse(jsonStr);
+              if (parsed.memories && Array.isArray(parsed.memories)) {
+                for (const mem of parsed.memories) {
+                  if (mem.key && mem.value) {
+                    await prisma.memory.upsert({
+                      where: {
+                        boardId_key: { boardId, key: String(mem.key) },
+                      },
+                      update: {
+                        value: String(mem.value),
+                        source: "agent",
+                        sourceTaskId: taskId,
+                      },
+                      create: {
+                        boardId,
+                        key: String(mem.key),
+                        value: String(mem.value),
+                        source: "agent",
+                        sourceTaskId: taskId,
+                      },
+                    });
+                  }
+                }
+                emitEvent({ type: "memory:updated", boardId });
+              }
+            } catch {
+              // JSON parse failure is non-critical
+            }
+          }
+          resolve();
+        });
+        proc.on("error", () => resolve());
+        setTimeout(() => {
+          try { proc.kill(); } catch {}
+          resolve();
+        }, 30000);
+      });
+    } catch {
+      // Memory extraction is best-effort
     }
   }
 }
