@@ -1,3 +1,5 @@
+import path from "path";
+import { mkdirSync } from "fs";
 import { prisma } from "./db";
 import { AgentProcess } from "./agent-process";
 import { emitEvent } from "./event-emitter";
@@ -100,23 +102,31 @@ class AgentDispatcher {
     const task = await prisma.task.findUnique({ where: { id: taskId } });
     if (!task) return;
 
+    // Resolve working directory: use repoUrl if set, otherwise create a workspace
+    let workDir = task.repoUrl || "";
+    if (!workDir) {
+      workDir = path.join(process.cwd(), "workspaces", taskId);
+      mkdirSync(workDir, { recursive: true });
+    }
+
     // Build prompt from task details
-    let prompt = task.title;
+    let prompt = `You are an autonomous AI agent. Complete the following task without asking questions.
+Work in the current directory: ${workDir}
+
+Task: ${task.title}`;
     if (task.description) {
       prompt += `\n\nDescription:\n${task.description}`;
     }
     if (task.criteria) {
       prompt += `\n\nAcceptance Criteria:\n${task.criteria}`;
     }
+    prompt += `\n\nDo not ask clarifying questions. Execute the task to completion.`;
 
     const agentProcess = new AgentProcess(taskId);
     this.activeProcesses.set(taskId, agentProcess);
 
     try {
-      const pid = await agentProcess.start(
-        prompt,
-        task.repoUrl || undefined
-      );
+      const pid = await agentProcess.start(prompt, workDir);
 
       await prisma.task.update({
         where: { id: taskId },

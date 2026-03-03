@@ -28,23 +28,25 @@ export class AgentProcess extends EventEmitter {
 
     const args = [
       "-p",
-      prompt,
       "--output-format",
       "stream-json",
+      "--verbose",
       "--max-turns",
       "50",
+      "--permission-mode",
+      "bypassPermissions",
     ];
-
-    if (cwd) {
-      args.push("--cwd", cwd);
-    }
 
     this.process = spawn("claude", args, {
       env,
       cwd: cwd || process.cwd(),
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       shell: true,
     });
+
+    // Write prompt via stdin to avoid shell mangling of multiline strings
+    this.process.stdin?.write(prompt);
+    this.process.stdin?.end();
 
     await this.writeLog("system", `Agent started (PID: ${this.process.pid})`);
 

@@ -111,7 +111,7 @@ export function CreateTaskForm() {
             <Input
               value={repoUrl}
               onChange={(e) => setRepoUrl(e.target.value)}
-              placeholder="/path/to/repo (optional)"
+              placeholder="Defaults to workspaces/<taskId> if empty"
             />
           </div>
 
