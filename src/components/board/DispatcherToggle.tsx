@@ -37,7 +37,7 @@ export function DispatcherToggle() {
         value={String(settings?.maxConcurrent ?? 2)}
         onValueChange={handleConcurrencyChange}
       >
-        <SelectTrigger className="h-8 w-[70px] text-xs">
+        <SelectTrigger className="h-8 w-[110px] text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

@@ -246,7 +246,7 @@ export function TaskCardDetail({
           </SheetTitle>
         </SheetHeader>
 
-        <div className="flex flex-1 flex-col gap-4 overflow-hidden">
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto">
           {/* Status & Priority */}
           <div className="flex items-center gap-2">
             <Badge
@@ -501,7 +501,7 @@ export function TaskCardDetail({
           <Separator />
 
           {/* Logs */}
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex flex-col">
             <h4 className="mb-2 text-xs font-medium text-muted-foreground">
               Agent Logs
             </h4>
