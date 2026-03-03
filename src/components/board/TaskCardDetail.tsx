@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Sheet,
   SheetContent,
@@ -8,12 +9,22 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { LogViewer } from "../logs/LogViewer";
 import {
   useDeleteTask,
   useStopTask,
   useRetryTask,
+  useUpdateTask,
 } from "@/hooks/useTasksQuery";
 import {
   PRIORITY_LABELS,
@@ -31,6 +42,100 @@ interface TaskCardDetailProps {
   onOpenChange: (open: boolean) => void;
 }
 
+function EditableText({
+  value,
+  onSave,
+  multiline = false,
+  placeholder = "",
+  className = "",
+  disabled = false,
+}: {
+  value: string;
+  onSave: (value: string) => void;
+  multiline?: boolean;
+  placeholder?: string;
+  className?: string;
+  disabled?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [editing]);
+
+  const commit = useCallback(() => {
+    setEditing(false);
+    const trimmed = draft.trim();
+    if (trimmed !== value) {
+      onSave(trimmed);
+    }
+  }, [draft, value, onSave]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      setDraft(value);
+      setEditing(false);
+    }
+    if (e.key === "Enter" && !multiline) {
+      commit();
+    }
+  };
+
+  if (disabled) {
+    return (
+      <span className={className}>
+        {value || <span className="text-muted-foreground italic">{placeholder || "Empty"}</span>}
+      </span>
+    );
+  }
+
+  if (editing) {
+    if (multiline) {
+      return (
+        <Textarea
+          ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          className="min-h-[60px] text-sm"
+          rows={3}
+        />
+      );
+    }
+    return (
+      <Input
+        ref={inputRef as React.RefObject<HTMLInputElement>}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        className="text-sm"
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`cursor-pointer rounded-md border border-transparent px-2 py-1 hover:border-border hover:bg-muted/50 ${className}`}
+      onClick={() => setEditing(true)}
+      title="Click to edit"
+    >
+      {value || <span className="text-muted-foreground italic">{placeholder || "Click to add..."}</span>}
+    </div>
+  );
+}
+
 export function TaskCardDetail({
   task,
   open,
@@ -39,6 +144,26 @@ export function TaskCardDetail({
   const deleteTask = useDeleteTask();
   const stopTask = useStopTask();
   const retryTask = useRetryTask();
+  const updateTask = useUpdateTask();
+
+  const isEditable =
+    task.status === TaskStatus.TODO ||
+    task.status === TaskStatus.READY ||
+    task.status === TaskStatus.DONE ||
+    task.status === TaskStatus.FAILED;
+
+  const handleUpdate = useCallback(
+    (field: string, value: string | number) => {
+      updateTask.mutate(
+        { id: task.id, [field]: value },
+        {
+          onSuccess: () => toast.success("Task updated"),
+          onError: () => toast.error("Failed to update task"),
+        }
+      );
+    },
+    [task.id, updateTask]
+  );
 
   const handleStop = () => {
     stopTask.mutate(task.id, {
@@ -67,11 +192,25 @@ export function TaskCardDetail({
     });
   };
 
+  const costDisplay =
+    task.inputTokens > 0 || task.outputTokens > 0
+      ? `${task.inputTokens.toLocaleString()} in / ${task.outputTokens.toLocaleString()} out` +
+        (task.costEstimate > 0 ? ` (~$${task.costEstimate.toFixed(4)})` : "")
+      : null;
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="flex w-full flex-col sm:max-w-lg">
         <SheetHeader>
-          <SheetTitle className="text-left">{task.title}</SheetTitle>
+          <SheetTitle className="text-left">
+            <EditableText
+              value={task.title}
+              onSave={(v) => handleUpdate("title", v)}
+              disabled={!isEditable}
+              placeholder="Task title"
+              className="text-lg font-semibold"
+            />
+          </SheetTitle>
         </SheetHeader>
 
         <div className="flex flex-1 flex-col gap-4 overflow-hidden">
@@ -83,12 +222,33 @@ export function TaskCardDetail({
             >
               {task.status}
             </Badge>
-            <Badge
-              variant="outline"
-              className={PRIORITY_COLORS[task.priority]}
-            >
-              {PRIORITY_LABELS[task.priority]}
-            </Badge>
+            {isEditable ? (
+              <Select
+                value={String(task.priority)}
+                onValueChange={(v) => handleUpdate("priority", parseInt(v))}
+              >
+                <SelectTrigger className="h-6 w-auto gap-1 border-0 px-2 text-xs">
+                  <Badge
+                    variant="outline"
+                    className={PRIORITY_COLORS[task.priority]}
+                  >
+                    <SelectValue />
+                  </Badge>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">High</SelectItem>
+                  <SelectItem value="2">Medium</SelectItem>
+                  <SelectItem value="3">Low</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : (
+              <Badge
+                variant="outline"
+                className={PRIORITY_COLORS[task.priority]}
+              >
+                {PRIORITY_LABELS[task.priority]}
+              </Badge>
+            )}
             {task.retryCount > 0 && (
               <span className="text-xs text-muted-foreground">
                 Retries: {task.retryCount}/{task.maxRetries}
@@ -115,38 +275,72 @@ export function TaskCardDetail({
             )}
           </div>
 
-          {/* Description */}
-          {task.description && (
+          {/* Token/Cost Info */}
+          {costDisplay && (
+            <div className="text-xs text-muted-foreground">
+              Tokens: {costDisplay}
+            </div>
+          )}
+
+          {/* Summary */}
+          {task.summary && (
             <>
               <Separator />
               <div>
                 <h4 className="mb-1 text-xs font-medium text-muted-foreground">
-                  Description
+                  Summary
                 </h4>
-                <p className="whitespace-pre-wrap text-sm">{task.description}</p>
+                <div className="whitespace-pre-wrap rounded-md bg-muted/50 p-3 text-sm">
+                  {task.summary}
+                </div>
               </div>
             </>
           )}
 
-          {/* Criteria */}
-          {task.criteria && (
-            <div>
-              <h4 className="mb-1 text-xs font-medium text-muted-foreground">
-                Acceptance Criteria
-              </h4>
-              <p className="whitespace-pre-wrap text-sm">{task.criteria}</p>
-            </div>
-          )}
+          {/* Description */}
+          <Separator />
+          <div>
+            <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+              Description
+            </h4>
+            <EditableText
+              value={task.description}
+              onSave={(v) => handleUpdate("description", v)}
+              disabled={!isEditable}
+              multiline
+              placeholder="Add a description..."
+              className="whitespace-pre-wrap text-sm"
+            />
+          </div>
 
-          {/* Repo URL */}
-          {task.repoUrl && (
-            <div>
-              <h4 className="mb-1 text-xs font-medium text-muted-foreground">
-                Working Directory
-              </h4>
-              <code className="text-xs">{task.repoUrl}</code>
-            </div>
-          )}
+          {/* Criteria */}
+          <div>
+            <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+              Acceptance Criteria
+            </h4>
+            <EditableText
+              value={task.criteria}
+              onSave={(v) => handleUpdate("criteria", v)}
+              disabled={!isEditable}
+              multiline
+              placeholder="Add acceptance criteria..."
+              className="whitespace-pre-wrap text-sm"
+            />
+          </div>
+
+          {/* Working Directory */}
+          <div>
+            <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+              Working Directory
+            </h4>
+            <EditableText
+              value={task.repoUrl}
+              onSave={(v) => handleUpdate("repoUrl", v)}
+              disabled={!isEditable}
+              placeholder="Defaults to workspaces/<taskId>"
+              className="text-xs font-mono"
+            />
+          </div>
 
           {/* Error */}
           {task.error && (

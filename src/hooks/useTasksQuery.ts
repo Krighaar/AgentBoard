@@ -83,6 +83,20 @@ export function useDeleteTask() {
   });
 }
 
+export function useClearDoneTasks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/tasks?scope=done", { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to clear done tasks");
+      return res.json() as Promise<{ success: boolean; deletedCount: number }>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+}
+
 export function useStopTask() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -122,6 +136,36 @@ export function useDispatcherStatus() {
         activeTasks: number;
         maxConcurrent: number;
       }>;
+    },
+  });
+}
+
+export function useSettings() {
+  return useQuery({
+    queryKey: ["settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/settings");
+      if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json() as Promise<{ maxConcurrent: number }>;
+    },
+  });
+}
+
+export function useUpdateSetting() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: { key: string; value: string }) => {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to update setting");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      queryClient.invalidateQueries({ queryKey: ["dispatcher"] });
     },
   });
 }

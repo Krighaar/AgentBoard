@@ -3,18 +3,22 @@ import { mkdirSync } from "fs";
 import { prisma } from "./db";
 import { AgentProcess } from "./agent-process";
 import { emitEvent } from "./event-emitter";
+import { getMaxConcurrent } from "./settings";
 
-const MAX_CONCURRENT = 2;
 const POLL_INTERVAL = 5000;
 
 class AgentDispatcher {
   private running = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private activeProcesses = new Map<string, AgentProcess>();
+  private maxConcurrent = 2;
 
   async start() {
     if (this.running) return;
     this.running = true;
+
+    // Load settings
+    this.maxConcurrent = await getMaxConcurrent();
 
     // Check for orphaned in_progress tasks on startup
     await this.cleanOrphans();
@@ -39,8 +43,12 @@ class AgentDispatcher {
     return {
       running: this.running,
       activeTasks: this.activeProcesses.size,
-      maxConcurrent: MAX_CONCURRENT,
+      maxConcurrent: this.maxConcurrent,
     };
+  }
+
+  async setMaxConcurrent(value: number) {
+    this.maxConcurrent = Math.max(1, Math.min(value, 10));
   }
 
   stopTask(taskId: string) {
@@ -83,17 +91,17 @@ class AgentDispatcher {
 
   private async poll() {
     if (!this.running) return;
-    if (this.activeProcesses.size >= MAX_CONCURRENT) return;
+    if (this.activeProcesses.size >= this.maxConcurrent) return;
 
-    const slotsAvailable = MAX_CONCURRENT - this.activeProcesses.size;
+    const slotsAvailable = this.maxConcurrent - this.activeProcesses.size;
     const tasks = await prisma.task.findMany({
-      where: { status: "todo" },
+      where: { status: "ready" },
       orderBy: [{ priority: "asc" }, { createdAt: "asc" }],
       take: slotsAvailable,
     });
 
     for (const task of tasks) {
-      if (this.activeProcesses.size >= MAX_CONCURRENT) break;
+      if (this.activeProcesses.size >= this.maxConcurrent) break;
       await this.executeTask(task.id);
     }
   }
@@ -138,7 +146,7 @@ Task: ${task.title}`;
       });
       emitEvent({ type: "task:updated", taskId });
 
-      agentProcess.on("complete", async () => {
+      agentProcess.on("complete", async (usage: { inputTokens: number; outputTokens: number; costEstimate: number }) => {
         this.activeProcesses.delete(taskId);
         await prisma.task.update({
           where: { id: taskId },
@@ -146,12 +154,18 @@ Task: ${task.title}`;
             status: "done",
             agentPid: null,
             completedAt: new Date(),
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            costEstimate: usage.costEstimate,
           },
         });
         emitEvent({ type: "task:updated", taskId });
+
+        // Generate summary asynchronously
+        this.generateSummary(taskId).catch(() => {});
       });
 
-      agentProcess.on("error", async (error: Error) => {
+      agentProcess.on("error", async (error: Error, usage: { inputTokens: number; outputTokens: number; costEstimate: number }) => {
         this.activeProcesses.delete(taskId);
 
         const currentTask = await prisma.task.findUnique({
@@ -170,6 +184,9 @@ Task: ${task.title}`;
               agentPid: null,
               error: error.message,
               retryCount: { increment: 1 },
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              costEstimate: usage.costEstimate,
             },
           });
         } else {
@@ -179,6 +196,9 @@ Task: ${task.title}`;
               status: "failed",
               agentPid: null,
               error: error.message,
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              costEstimate: usage.costEstimate,
             },
           });
         }
@@ -198,6 +218,70 @@ Task: ${task.title}`;
         },
       });
       emitEvent({ type: "task:updated", taskId });
+    }
+  }
+
+  private async generateSummary(taskId: string) {
+    // Fetch the last N logs for the task
+    const logs = await prisma.taskLog.findMany({
+      where: { taskId, stream: "stdout" },
+      orderBy: { timestamp: "desc" },
+      take: 100,
+    });
+
+    if (logs.length === 0) return;
+
+    const logText = logs
+      .reverse()
+      .map((l) => l.content)
+      .join("\n")
+      .slice(-8000); // limit to ~8k chars
+
+    const prompt = `Summarize what this AI agent did in 3-5 concise bullet points. Focus on actions taken and outcomes. Be specific about files changed, commands run, or decisions made.\n\nAgent logs:\n${logText}`;
+
+    try {
+      const { spawn } = await import("child_process");
+
+      const env = { ...process.env };
+      delete env.CLAUDECODE;
+      for (const key of Object.keys(env)) {
+        if (key.startsWith("CLAUDE_")) delete env[key];
+      }
+
+      const proc = spawn("claude", ["-p", "--model", "haiku"], {
+        env,
+        stdio: ["pipe", "pipe", "pipe"],
+        shell: true,
+      });
+
+      proc.stdin?.write(prompt);
+      proc.stdin?.end();
+
+      let output = "";
+      proc.stdout?.on("data", (data: Buffer) => {
+        output += data.toString();
+      });
+
+      await new Promise<void>((resolve) => {
+        proc.on("close", async (code) => {
+          if (code === 0 && output.trim()) {
+            await prisma.task.update({
+              where: { id: taskId },
+              data: { summary: output.trim() },
+            });
+            emitEvent({ type: "task:updated", taskId });
+          }
+          resolve();
+        });
+        proc.on("error", () => resolve());
+        // Timeout after 30 seconds
+        setTimeout(() => {
+          try { proc.kill(); } catch {}
+          resolve();
+        }, 30000);
+      });
+    } catch {
+      // Summary generation is best-effort
     }
   }
 }

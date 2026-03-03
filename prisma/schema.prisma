@@ -13,7 +13,7 @@ model Task {
   description String    @default("")
   criteria    String    @default("")
   repoUrl     String    @default("")
-  status      String    @default("todo") // todo | in_progress | done | failed
+  status      String    @default("todo") // todo | ready | in_progress | done | failed
   priority    Int       @default(2) // 1=high, 2=medium, 3=low
   agentPid    Int?
   startedAt   DateTime?
@@ -22,10 +22,19 @@ model Task {
   maxRetries  Int       @default(2)
   error       String?
   position    Int       @default(0)
+  summary     String?   // AI-generated summary of agent output
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  costEstimate Float    @default(0) // estimated cost in USD
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   logs TaskLog[]
+}
+
+model Setting {
+  key   String @id
+  value String
 }
 
 model TaskLog {

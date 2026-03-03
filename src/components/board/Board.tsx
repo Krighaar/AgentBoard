@@ -8,7 +8,14 @@ import {
 import { Column } from "./Column";
 import { CreateTaskForm } from "../forms/CreateTaskForm";
 import { DispatcherToggle } from "./DispatcherToggle";
-import { useTasksQuery, useUpdateTask } from "@/hooks/useTasksQuery";
+import { NotificationToggle } from "./NotificationToggle";
+import { BoardStats } from "./BoardStats";
+import { Button } from "@/components/ui/button";
+import {
+  useTasksQuery,
+  useUpdateTask,
+  useClearDoneTasks,
+} from "@/hooks/useTasksQuery";
 import { useEventSource } from "@/hooks/useEventSource";
 import { COLUMN_ORDER, TaskStatus } from "@/lib/types";
 import type { Task } from "@/generated/prisma/client";
@@ -17,10 +24,12 @@ export function Board() {
   useEventSource();
   const { data: tasks = [], isLoading } = useTasksQuery();
   const updateTask = useUpdateTask();
+  const clearDoneTasks = useClearDoneTasks();
 
   const tasksByStatus = useMemo(() => {
     const grouped: Record<string, Task[]> = {
       todo: [],
+      ready: [],
       in_progress: [],
       done: [],
     };
@@ -30,8 +39,13 @@ export function Board() {
         grouped[status].push(task);
       }
     }
+    // Newest first in each column
+    for (const key of Object.keys(grouped)) {
+      grouped[key].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
     return grouped;
   }, [tasks]);
+  const doneCount = tasksByStatus.done.length;
 
   const onDragEnd = useCallback(
     (result: DropResult) => {
@@ -78,10 +92,21 @@ export function Board() {
       <header className="flex items-center justify-between border-b border-border px-6 py-4">
         <h1 className="text-xl font-semibold">AgentBoard</h1>
         <div className="flex items-center gap-3">
+          <NotificationToggle />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => clearDoneTasks.mutate()}
+            disabled={clearDoneTasks.isPending || doneCount === 0}
+          >
+            Clear Done
+          </Button>
           <DispatcherToggle />
           <CreateTaskForm />
         </div>
       </header>
+
+      <BoardStats />
 
       <div className="flex flex-1 gap-6 overflow-x-auto p-6">
         <DragDropContext onDragEnd={onDragEnd}>

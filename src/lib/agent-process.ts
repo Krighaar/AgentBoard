@@ -3,12 +3,18 @@ import { EventEmitter } from "events";
 import { prisma } from "./db";
 import { emitEvent } from "./event-emitter";
 
+// Cost per million tokens (approximate, Sonnet 4 as default)
+const COST_PER_M_INPUT = 3.0;
+const COST_PER_M_OUTPUT = 15.0;
+
 export class AgentProcess extends EventEmitter {
   private process: ChildProcess | null = null;
   private taskId: string;
   private killed = false;
   private logBuffer: Array<{ stream: string; content: string }> = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
+  private inputTokens = 0;
+  private outputTokens = 0;
 
   constructor(taskId: string) {
     super();
@@ -71,9 +77,25 @@ export class AgentProcess extends EventEmitter {
                 );
               }
             }
+            // Extract usage from assistant messages
+            if (parsed.message?.usage) {
+              this.inputTokens += parsed.message.usage.input_tokens ?? 0;
+              this.outputTokens += parsed.message.usage.output_tokens ?? 0;
+            }
           } else if (parsed.type === "result") {
             if (parsed.result) {
               this.bufferLog("stdout", parsed.result);
+            }
+            // Extract usage from result
+            if (parsed.usage) {
+              this.inputTokens += parsed.usage.input_tokens ?? 0;
+              this.outputTokens += parsed.usage.output_tokens ?? 0;
+            }
+            // Also check total_usage in result
+            if (parsed.total_usage) {
+              // total_usage is cumulative — replace instead of add
+              this.inputTokens = parsed.total_usage.input_tokens ?? this.inputTokens;
+              this.outputTokens = parsed.total_usage.output_tokens ?? this.outputTokens;
             }
           }
         } catch {
@@ -98,21 +120,37 @@ export class AgentProcess extends EventEmitter {
 
       if (this.killed) return;
 
+      const usage = this.getUsage();
+
       if (code === 0) {
-        await this.writeLog("system", "Agent completed successfully");
-        this.emit("complete");
+        await this.writeLog(
+          "system",
+          `Agent completed successfully (${this.inputTokens.toLocaleString()} in / ${this.outputTokens.toLocaleString()} out tokens)`
+        );
+        this.emit("complete", usage);
       } else {
         await this.writeLog("system", `Agent exited with code ${code}`);
-        this.emit("error", new Error(`Process exited with code ${code}`));
+        this.emit("error", new Error(`Process exited with code ${code}`), usage);
       }
     });
 
     this.process.on("error", async (err) => {
       await this.writeLog("system", `Agent error: ${err.message}`);
-      this.emit("error", err);
+      this.emit("error", err, this.getUsage());
     });
 
     return this.process.pid;
+  }
+
+  private getUsage() {
+    const costEstimate =
+      (this.inputTokens / 1_000_000) * COST_PER_M_INPUT +
+      (this.outputTokens / 1_000_000) * COST_PER_M_OUTPUT;
+    return {
+      inputTokens: this.inputTokens,
+      outputTokens: this.outputTokens,
+      costEstimate: Math.round(costEstimate * 10000) / 10000, // 4 decimal places
+    };
   }
 
   private bufferLog(stream: string, content: string) {

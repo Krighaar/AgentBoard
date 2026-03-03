@@ -8,10 +8,14 @@ const updateTaskSchema = z.object({
   description: z.string().optional(),
   criteria: z.string().optional(),
   repoUrl: z.string().optional(),
-  status: z.enum(["todo", "in_progress", "done", "failed"]).optional(),
+  status: z.enum(["todo", "ready", "in_progress", "done", "failed"]).optional(),
   priority: z.number().int().min(1).max(3).optional(),
   position: z.number().int().optional(),
   error: z.string().nullable().optional(),
+  summary: z.string().nullable().optional(),
+  inputTokens: z.number().int().optional(),
+  outputTokens: z.number().int().optional(),
+  costEstimate: z.number().optional(),
 });
 
 export async function GET(

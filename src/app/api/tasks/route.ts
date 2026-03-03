@@ -50,3 +50,33 @@ export async function POST(request: Request) {
     );
   }
 }
+
+export async function DELETE(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const scope = searchParams.get("scope");
+
+  if (scope !== "done") {
+    return NextResponse.json(
+      { error: "Invalid scope. Use scope=done" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const result = await prisma.task.deleteMany({
+      where: {
+        status: {
+          in: ["done", "failed"],
+        },
+      },
+    });
+
+    emitEvent({ type: "task:updated", taskId: "bulk-clear-done" });
+    return NextResponse.json({ success: true, deletedCount: result.count });
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to clear done tasks" },
+      { status: 500 }
+    );
+  }
+}
