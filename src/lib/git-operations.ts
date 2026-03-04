@@ -75,9 +75,25 @@ export function createWorktreeForTask(
     // Offline or no remote — continue with local state
   }
 
-  // Create worktree with a new branch based on the base branch
+  // Determine the best starting point for the new branch
+  // Prefer origin/<baseBranch>, fall back to local <baseBranch>
+  let startPoint = `origin/${baseBranch}`;
+  try {
+    git(`rev-parse --verify "${startPoint}"`, repoPath);
+  } catch {
+    // origin/<baseBranch> doesn't exist — try local branch
+    startPoint = baseBranch;
+    try {
+      git(`rev-parse --verify "${startPoint}"`, repoPath);
+    } catch {
+      // Local branch doesn't exist either — use HEAD
+      startPoint = "HEAD";
+    }
+  }
+
+  // Create worktree with a new branch based on the resolved start point
   git(
-    `worktree add "${worktreePath}" -b "${branchName}" "origin/${baseBranch}"`,
+    `worktree add "${worktreePath}" -b "${branchName}" "${startPoint}"`,
     repoPath
   );
 
@@ -316,8 +332,15 @@ export function getWorktreeDiff(
   baseBranch: string
 ): string {
   try {
+    // Try origin/<baseBranch> first, fall back to local <baseBranch>
+    let diffBase = `origin/${baseBranch}`;
+    try {
+      git(`rev-parse --verify "${diffBase}"`, worktreePath);
+    } catch {
+      diffBase = baseBranch;
+    }
     const diff = git(
-      `diff "origin/${baseBranch}"...HEAD`,
+      `diff "${diffBase}"...HEAD`,
       worktreePath,
       15000
     );
