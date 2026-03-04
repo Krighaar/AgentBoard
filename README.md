@@ -2,6 +2,9 @@
 
 Kanban-style task board where AI agents (Claude Code CLI) autonomously pick up and execute tasks. Create tasks on the board, start the dispatcher, and watch Claude agents work through them — with real-time log streaming, auto-retry on failure, and manual stop/retry controls.
 
+<img width="2378" height="959" alt="image" src="https://github.com/user-attachments/assets/38e5d469-1aad-4053-9fd8-77fc708923fb" />
+
+
 ## Features
 
 - **3-column Kanban board** — To Do, In Progress, Done (with drag-and-drop)
