@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(test:*)",
+      "Bash(npx:*)",
+      "Bash(sqlite3:*)",
+      "Bash(npm run:*)",
+      "Bash(curl:*)",
+      "Bash(rm:*)",
+      "Bash(echo Task ID: $TASK_ID:*)",
+      "Bash(env:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); print\\(data[0][''text'']\\)\")",
+      "WebSearch"
+    ]
+  }
+}

@@ -10,7 +10,6 @@ import { BoardSelector } from "./BoardSelector";
 import { CreateTaskForm } from "../forms/CreateTaskForm";
 import { DispatcherToggle } from "./DispatcherToggle";
 import { NotificationToggle } from "./NotificationToggle";
-import { ThemeToggle } from "./ThemeToggle";
 import { BoardStats } from "./BoardStats";
 import { SearchBar } from "./SearchBar";
 import { ShortcutsHelp } from "./ShortcutsHelp";
@@ -253,7 +252,6 @@ export function Board() {
           <BoardSelector boardId={boardId} onBoardChange={handleBoardChange} />
         </div>
         <div className="flex items-center gap-3">
-          <ThemeToggle />
           <NotificationToggle />
           <Button variant="outline" size="sm" onClick={handleExport}>
             Export
