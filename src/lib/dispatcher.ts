@@ -193,12 +193,12 @@ class AgentDispatcher {
           data: { worktreePath, branchName },
         });
       } catch (err) {
-        // If worktree creation fails, fall back to default workspace
         const errMsg = err instanceof Error ? err.message : "Worktree creation failed";
         await prisma.taskLog.create({
-          data: { taskId, stream: "system", content: `Git worktree setup failed: ${errMsg}. Falling back to default workspace.` },
+          data: { taskId, stream: "system", content: `Git worktree setup failed: ${errMsg}. Falling back to repo directory.` },
         });
-        workDir = "";
+        // Fall back to the board's repo path directly (no worktree isolation)
+        workDir = board.repoPath;
       }
     }
 
